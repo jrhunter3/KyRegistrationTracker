@@ -39,8 +39,18 @@ scraper.py → downloader.py → parser.py → database.py → dashboard.py
 
 ## Database Schema (SQLite)
 
-Tables: `registrations`, `county_stats`, `district_stats`, `precinct_stats`, `downloads_log`
-See `IMPLEMENTATION_PLAN.md` section 5 for full DDL.
+**Tables:** `registrations`, `county_stats`, `downloads_log` (Phase 2 adds `district_stats`, `precinct_stats`)
+
+**registrations** — Overall state-wide totals per month (extracted from XLS "Statewide totals" row).  
+Columns: month, total, democratic, republican, other, independent, libertarian, green, constitution, reform, socialist_workers, kentucky_party, male, female, source_file.  
+UNIQUE(month).
+
+**county_stats** — Per-county per-month data (from XLS files).  
+Columns: month, county_code (3-digit), county_name, precinct_count, all party columns, male, female, total, source_file.  
+UNIQUE(month, county_code).
+
+**downloads_log** — Tracks download and parse status for incremental updates.  
+Columns: url, filename, downloaded_at, file_size, status (pending/downloaded/parsed).
 
 ## Key Conventions
 
@@ -91,7 +101,7 @@ streamlit run ky_voter_tracker/dashboard.py
 
 - Step 1 ✅ — Scaffold complete (pyproject.toml, .gitignore, package dirs)
 - Step 2 ✅ — Scraper complete (437 links parsed, 21 tests)
-- Step 3 🔲 — Database Layer (next)
+- Step 3 ✅ — Database Layer (registrations + county_stats + downloads_log, 14 tests)
 - Step 4 🔲 — Downloader
 - Step 5 🔲 — XLS Parser
 - Step 6 🔲 — Main Pipeline
@@ -104,6 +114,11 @@ See `IMPLEMENTATION_PLAN.md` and `TODO.md` for full details.
 ## Phase 2 (Deferred)
 PDF parsing is planned for Phase 2. Tools: `camelot` / `pdfplumber`.
 Dashboard county/district/precinct views also deferred to Phase 2.
+
+### Phase 2 Schema Notes
+- **precinct_stats**: Includes `c_s_ld_sc` column for the composite Congressional-Senate-LD-SupremeCourt code found in precinct PDFs.
+- **district_stats**: Single normalized table with `district_type` column (congressional/senate/house/supreme_court) rather than four separate tables.
+- Both tables mirror the full party + gender column set from `county_stats`.
 
 ## Environment
 - Python 3.10+
