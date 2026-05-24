@@ -38,7 +38,7 @@ def main() -> None:
     args = _parse_args()
     conn = db.init_db()
 
-    run_all = args.all or not (args.scrape or args.download or args.parse)
+    run_all = args.all or not (args.scrape or args.download or args.parse or args.download_pdf or args.parse_pdf)
     links = None
 
     if args.scrape or run_all:
@@ -107,7 +107,6 @@ def main() -> None:
                     print(f"{len(counties)} counties")
                 else:
                     print("skipped (not yet implemented)")
-                    continue
 
                 db.mark_parsed(conn, link["url"])
 

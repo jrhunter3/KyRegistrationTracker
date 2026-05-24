@@ -107,119 +107,46 @@ def parse_xls(
     return statewide, county_rows
 
 
-def _parse_pdf_header(words: list[dict], header_y: float) -> dict[float, str]:
-    header_entries = []
-    for w in words:
-        if w["top"] >= header_y - 2 and w["top"] <= header_y + 15:
-            header_entries.append(w)
+PDF_DATA_KEYS_13 = [
+    "precinct_count", "democratic", "republican", "other",
+    "independent", "libertarian", "green", "constitution",
+    "reform", "socialist_workers",
+    "male", "female", "total",
+]
 
-    header_entries.sort(key=lambda x: (x["x0"], x["top"]))
-
-    merged = []
-    for w in header_entries:
-        if merged and w["x0"] - merged[-1]["x1"] < 3:
-            merged[-1]["text"] += " " + w["text"]
-            merged[-1]["x1"] = max(merged[-1]["x1"], w["x1"])
-        else:
-            merged.append({"text": w["text"], "x0": w["x0"], "x1": w["x1"]})
-
-    col_map: dict[float, str] = {}
-    for entry in merged:
-        key = entry["text"].strip().lower()
-        canonical = HEADER_MAP.get(key)
-        if canonical:
-            x_center = (entry["x0"] + entry["x1"]) / 2
-            col_map[x_center] = canonical
-
-    return col_map
+PDF_DATA_KEYS_14 = [
+    "precinct_count", "democratic", "republican", "other",
+    "independent", "libertarian", "green", "constitution",
+    "reform", "socialist_workers", "kentucky_party",
+    "male", "female", "total",
+]
 
 
-def _parse_pdf_row_dict(
+def _build_pdf_row(
     values: list[int],
-    col_centers: list[float],
-    col_map: dict[float, str],
+    county_code: Optional[str],
+    county_name: Optional[str],
     month: str,
     source_file: str,
 ) -> dict:
+    if len(values) == 13:
+        keys = PDF_DATA_KEYS_13
+    else:
+        keys = PDF_DATA_KEYS_14
+
     d: dict = {"month": month, "source_file": source_file}
-    for idx, val in enumerate(values):
-        if idx < len(col_centers):
-            key = col_map.get(col_centers[idx])
-            if key:
-                d[key] = val
+    for idx, key in enumerate(keys):
+        if idx < len(values):
+            d[key] = values[idx]
+    if county_code is not None:
+        d["county_code"] = county_code
+    if county_name is not None:
+        d["county_name"] = county_name
     for col in PARTY_COLS:
         d.setdefault(col, 0)
     d.setdefault("male", 0)
     d.setdefault("female", 0)
     return d
-
-
-def parse_county_pdf(
-    filepath: str,
-    month: str,
-) -> tuple[Optional[dict], list[dict]]:
-    statewide = None
-    counties = []
-
-    with pdfplumber.open(filepath) as pdf:
-        col_map: Optional[dict[float, str]] = None
-        col_centers: Optional[list[float]] = None
-        header_y = None
-
-        for page in pdf.pages:
-            words = page.extract_words(x_tolerance=3, y_tolerance=3)
-
-            if header_y is None:
-                for w in words:
-                    if w["text"] == "County":
-                        header_y = w["top"]
-                        break
-
-            if col_map is None and header_y is not None:
-                col_map = _parse_pdf_header(words, header_y)
-                col_centers = sorted(col_map.keys())
-
-            rows: dict[float, list[dict]] = {}
-            for w in words:
-                if header_y is not None and w["top"] <= header_y + 12:
-                    continue
-                y_key = round(w["top"], 0)
-                rows.setdefault(y_key, []).append(w)
-
-            for y_key in sorted(rows.keys()):
-                row_words = sorted(rows[y_key], key=lambda x: x["x0"])
-                texts = [w["text"] for w in row_words]
-                if not texts:
-                    continue
-
-                combined = " ".join(texts)
-                if combined.strip().lower().startswith("statewide totals"):
-                    raw_values = texts[2:] if len(texts) > 2 else []
-                    values = _to_ints(raw_values)
-                    if col_centers is not None and col_map is not None:
-                        statewide = _parse_pdf_row_dict(
-                            values, col_centers, col_map, month, filepath,
-                        )
-                    continue
-
-                if not texts[0].isdigit() or len(texts[0]) != 3:
-                    continue
-                if int(texts[0]) < 1 or int(texts[0]) > 120:
-                    continue
-
-                county_code = texts[0]
-                county_name = texts[1]
-                raw_values = texts[2:]
-                values = _to_ints(raw_values)
-                if col_centers is not None and col_map is not None:
-                    row_dict = _parse_pdf_row_dict(
-                        values, col_centers, col_map, month, filepath,
-                    )
-                    row_dict["county_code"] = county_code
-                    row_dict["county_name"] = county_name
-                    counties.append(row_dict)
-
-    return statewide, counties
 
 
 def _to_ints(raw: list[str]) -> list[int]:
@@ -230,3 +157,44 @@ def _to_ints(raw: list[str]) -> list[int]:
         except ValueError:
             result.append(0)
     return result
+
+
+def parse_county_pdf(
+    filepath: str,
+    month: str,
+) -> tuple[Optional[dict], list[dict]]:
+    statewide = None
+    counties = []
+
+    with pdfplumber.open(filepath) as pdf:
+        for page in pdf.pages:
+            text = page.extract_text(x_tolerance=1)
+            for line in text.split("\n"):
+                stripped = line.strip()
+                if not stripped:
+                    continue
+
+                if stripped.lower().startswith("statewide totals"):
+                    parts = stripped.split()
+                    if len(parts) >= 15:
+                        vals = _to_ints(parts[2:])
+                        statewide = _build_pdf_row(
+                            vals, None, None, month, filepath,
+                        )
+                    continue
+
+                parts = stripped.split()
+                if len(parts) < 15 or len(parts) > 16:
+                    continue
+                if not parts[0].isdigit() or len(parts[0]) != 3:
+                    continue
+                if int(parts[0]) < 1 or int(parts[0]) > 120:
+                    continue
+
+                vals = _to_ints(parts[2:])
+                row_dict = _build_pdf_row(
+                    vals, parts[0], parts[1], month, filepath,
+                )
+                counties.append(row_dict)
+
+    return statewide, counties
