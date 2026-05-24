@@ -46,6 +46,7 @@ def download_files(
     conn,
     links: list[dict],
     raw_dir: str = RAW_DIR,
+    force: bool = False,
 ) -> set[str]:
     os.makedirs(raw_dir, exist_ok=True)
     downloaded: set[str] = set()
@@ -55,7 +56,7 @@ def download_files(
 
     try:
         for link in links:
-            if _is_downloaded(conn, link["url"]):
+            if not force and _is_downloaded(conn, link["url"]):
                 continue
 
             dest_path = os.path.join(raw_dir, link["filename"])

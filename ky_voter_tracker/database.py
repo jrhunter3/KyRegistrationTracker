@@ -231,3 +231,10 @@ def get_unparsed_files(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     return conn.execute(
         "SELECT url, filename FROM downloads_log WHERE status = 'downloaded' AND parsed = 0"
     ).fetchall()
+
+
+def reset_parsed_flags(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        "UPDATE downloads_log SET parsed = 0, status = 'downloaded' WHERE status = 'parsed'"
+    )
+    conn.commit()
