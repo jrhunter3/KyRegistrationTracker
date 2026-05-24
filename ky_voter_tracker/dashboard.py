@@ -28,6 +28,9 @@ PARTY_COLORS = {
     "kentucky_party": "#6b7280", "other": "#9ca3af",
 }
 
+MAJOR_COLOR = "#4f46e5"
+ALT_COLOR = "#059669"
+
 
 @st.cache_resource
 def get_conn() -> sqlite3.Connection:
@@ -76,6 +79,27 @@ def load_county_stats(
     ).fetchall()
 
 
+def _alt_parties() -> list[str]:
+    return [p for p in PARTIES if p not in ("democratic", "republican")]
+
+
+def compute_alternative(regs: list[sqlite3.Row]) -> list[int]:
+    alt = _alt_parties()
+    return [sum(r[p] for p in alt) for r in regs]
+
+
+def compute_major(regs: list[sqlite3.Row]) -> list[int]:
+    return [r["democratic"] + r["republican"] for r in regs]
+
+
+def _growth(values: list[float]) -> list[float]:
+    result = [0.0]
+    for i in range(1, len(values)):
+        prev = values[i - 1]
+        result.append(0.0 if prev == 0 else (values[i] - prev) / prev * 100)
+    return result
+
+
 st.set_page_config(page_title="KY Voter Registration Tracker", layout="wide")
 st.title("Kentucky Voter Registration Tracker")
 st.markdown("Data from KY State Board of Elections (2017–present)")
@@ -94,21 +118,32 @@ with st.sidebar:
         value=(min_month, max_month),
     )
 
-tab1, tab2, tab3 = st.tabs(
-    ["Statewide Overview", "Party Breakdown", "County Comparison"]
-)
+    selected_parties = st.multiselect(
+        "Parties",
+        options=PARTIES,
+        default=PARTIES,
+        format_func=lambda x: PARTY_LABELS.get(x, x),
+    )
+
+    use_share = st.radio("Display", ["Raw counts", "Share (%)"]) == "Share (%)"
+
+    group_major_alt = st.checkbox("Group as Major vs Alternative", value=False)
 
 regs = load_registrations(from_month, until_month)
 months = [r["month"] for r in regs]
+totals = [r["total"] for r in regs]
 
 if not regs:
-    for tab in [tab1, tab2, tab3]:
-        tab.warning("No data for the selected filters.")
+    st.warning("No data for the selected filters.")
     st.stop()
 
-with tab1:
-    totals = [r["total"] for r in regs]
+tab1, tab2, tab3 = st.tabs(
+    ["Statewide Overview", "Party Comparison", "County Comparison"]
+)
 
+# ── Tab 1: Statewide Overview ──────────────────────────────────────────────
+
+with tab1:
     fig_total = px.line(
         x=months, y=totals,
         title="Total Registered Voters",
@@ -141,74 +176,191 @@ with tab1:
 
     with col2:
         latest = regs[-1]
-        cols = col2.columns(3)
-        cols[0].metric("Total", f"{latest['total']:,}")
-        cols[0].metric(
-            "Democratic", f"{latest['democratic']:,}",
-            delta=f"{latest['democratic'] / latest['total'] * 100:.1f}%",
+        ncols = min(len(selected_parties) + 1, 4)
+        metric_cols = col2.columns(ncols)
+        idx = 0
+
+        metric_cols[idx].metric("Total", f"{latest['total']:,}")
+        idx += 1
+
+        for p in selected_parties[: ncols - 1]:
+            metric_cols[idx].metric(
+                PARTY_LABELS.get(p, p),
+                f"{latest[p]:,}",
+                delta=f"{latest[p] / latest['total'] * 100:.1f}%",
+            )
+            idx += 1
+
+    if selected_parties:
+        tab1.subheader("Party Trend Overlay")
+        fig_overlay = go.Figure()
+        fig_overlay.add_trace(go.Scatter(
+            x=months, y=totals, mode="lines", name="Total",
+            line=dict(color="#9ca3af", width=1, dash="dot"),
+        ))
+
+        show_parties = list(selected_parties)
+
+        if group_major_alt and {"democratic", "republican"} & set(selected_parties):
+            major_vals = compute_major(regs)
+            alt_vals = compute_alternative(regs)
+            show_parties = [p for p in selected_parties if p not in ("democratic", "republican")]
+
+            if use_share:
+                combined = [m + a for m, a in zip(major_vals, alt_vals)]
+                major_disp = [m / c * 100 for m, c in zip(major_vals, combined)]
+                alt_disp = [a / c * 100 for a, c in zip(alt_vals, combined)]
+            else:
+                major_disp = major_vals
+                alt_disp = alt_vals
+
+            fig_overlay.add_trace(go.Scatter(
+                x=months, y=major_disp, mode="lines",
+                name="Major (Dem + Rep)",
+                line=dict(color=MAJOR_COLOR, width=2.5),
+            ))
+            fig_overlay.add_trace(go.Scatter(
+                x=months, y=alt_disp, mode="lines",
+                name="Alternative",
+                line=dict(color=ALT_COLOR, width=2.5),
+            ))
+
+        for p in show_parties:
+            vals = [r[p] for r in regs]
+            if use_share:
+                vals = [v / t * 100 for v, t in zip(vals, totals)]
+            fig_overlay.add_trace(go.Scatter(
+                x=months, y=vals, mode="lines",
+                name=PARTY_LABELS.get(p, p),
+                line=dict(dash="dot", width=1),
+            ))
+
+        fig_overlay.update_layout(
+            title="Party Totals",
+            hovermode="x unified",
+            yaxis_title="Share (%)" if use_share else "Voters",
+            legend=dict(font=dict(size=10)),
         )
-        cols[1].metric(
-            "Republican", f"{latest['republican']:,}",
-            delta=f"{latest['republican'] / latest['total'] * 100:.1f}%",
-        )
-        cols[1].metric(
-            "Other", f"{latest['other']:,}",
-            delta=f"{latest['other'] / latest['total'] * 100:.1f}%",
-        )
-        cols[2].metric(
-            "Independent", f"{latest['independent']:,}",
-            delta=f"{latest['independent'] / latest['total'] * 100:.1f}%",
-        )
+        tab1.plotly_chart(fig_overlay, width='stretch')
+
+# ── Tab 2: Party Comparison ────────────────────────────────────────────────
 
 with tab2:
-    party_data = {p: [r[p] for r in regs] for p in PARTIES}
-    dem_pct = [d / t * 100 for d, t in zip(party_data["democratic"], totals)]
-    rep_pct = [d / t * 100 for d, t in zip(party_data["republican"], totals)]
-    ind_pct = [d / t * 100 for d, t in zip(party_data["independent"], totals)]
-    other_pct = [(t - d - r - i) / t * 100
-                 for d, r, i, t in zip(
-                     party_data["democratic"], party_data["republican"],
-                     party_data["independent"], totals,
-                 )]
+    if not selected_parties:
+        tab2.info("Select at least one party in the sidebar to show comparison charts.")
+    else:
+        chart_style = tab2.radio(
+            "Chart style",
+            ["Overlaid lines", "Stacked area", "Stacked area (%)"],
+            horizontal=True,
+        )
 
-    fig_party_area = go.Figure()
-    fig_party_area.add_trace(go.Scatter(
-        x=months, y=dem_pct, mode="lines", name="Democratic",
-        stackgroup="one", line=dict(width=0.5, color=PARTY_COLORS["democratic"]),
-    ))
-    fig_party_area.add_trace(go.Scatter(
-        x=months, y=rep_pct, mode="lines", name="Republican",
-        stackgroup="one", line=dict(width=0.5, color=PARTY_COLORS["republican"]),
-    ))
-    fig_party_area.add_trace(go.Scatter(
-        x=months, y=ind_pct, mode="lines", name="Independent",
-        stackgroup="one", line=dict(width=0.5, color=PARTY_COLORS["independent"]),
-    ))
-    fig_party_area.add_trace(go.Scatter(
-        x=months, y=other_pct, mode="lines", name="Other",
-        stackgroup="one", line=dict(width=0.5, color=PARTY_COLORS["other"]),
-    ))
-    fig_party_area.update_layout(
-        title="Party Registration Share (% of Total)",
-        yaxis_title="Percentage",
-        hovermode="x unified",
-        yaxis=dict(ticksuffix="%"),
-    )
-    tab2.plotly_chart(fig_party_area, width='stretch')
+        stacking = chart_style != "Overlaid lines"
+        show_pct = chart_style == "Stacked area (%)"
 
-    dem_vals = party_data["democratic"]
-    rep_vals = party_data["republican"]
-    diff_d = [d - r for d, r in zip(dem_vals, rep_vals)]
+        fig = go.Figure()
 
-    fig_diff = px.bar(
-        x=months, y=diff_d,
-        title="Democratic Advantage (Dem - Rep)",
-        labels={"x": "Month", "y": "Voter Advantage"},
-        color=diff_d,
-        color_continuous_scale=["#dc2626", "#fef2f2", "#1a56db"],
-    )
-    fig_diff.update_layout(hovermode="x unified", showlegend=False)
-    tab2.plotly_chart(fig_diff, width='stretch')
+        if group_major_alt and {"democratic", "republican"} & set(selected_parties):
+            show_parties = [p for p in selected_parties if p not in ("democratic", "republican")]
+            major_vals = compute_major(regs)
+            alt_vals = compute_alternative(regs)
+
+            if show_pct:
+                combined = [m + a for m, a in zip(major_vals, alt_vals)]
+                major_disp = [m / c * 100 for m, c in zip(major_vals, combined)]
+                alt_disp = [a / c * 100 for a, c in zip(alt_vals, combined)]
+            else:
+                major_disp = major_vals
+                alt_disp = alt_vals
+
+            fig.add_trace(go.Scatter(
+                x=months, y=major_disp, mode="lines",
+                name="Major (Dem + Rep)",
+                stackgroup="one" if stacking else None,
+                line=dict(width=0.5 if stacking else 2.5, color=MAJOR_COLOR),
+            ))
+            fig.add_trace(go.Scatter(
+                x=months, y=alt_disp, mode="lines",
+                name="Alternative",
+                stackgroup="one" if stacking else None,
+                line=dict(width=0.5 if stacking else 2.5, color=ALT_COLOR),
+            ))
+
+            for p in show_parties:
+                vals = [r[p] for r in regs]
+                if stacking:
+                    continue
+                fig.add_trace(go.Scatter(
+                    x=months, y=vals, mode="lines",
+                    name=PARTY_LABELS.get(p, p),
+                    line=dict(dash="dot", width=1),
+                ))
+        else:
+            for p in selected_parties:
+                vals = [r[p] for r in regs]
+                if show_pct:
+                    vals = [v / t * 100 for v, t in zip(vals, totals)]
+                fig.add_trace(go.Scatter(
+                    x=months, y=vals, mode="lines",
+                    name=PARTY_LABELS.get(p, p),
+                    stackgroup="one" if stacking else None,
+                    line=dict(width=0.5 if stacking else 2, color=PARTY_COLORS.get(p)),
+                ))
+
+        y_title = "Share (%)" if show_pct else "Voters"
+        fig.update_layout(
+            title="Party Comparison",
+            hovermode="x unified",
+            yaxis_title=y_title,
+            legend=dict(font=dict(size=10)),
+        )
+        if show_pct:
+            fig.update_layout(yaxis=dict(ticksuffix="%"))
+        tab2.plotly_chart(fig, width='stretch')
+
+        if len(selected_parties) >= 1:
+            tab2.subheader("Month-over-Month Growth Rate")
+            fig_growth = go.Figure()
+
+            if group_major_alt and {"democratic", "republican"} & set(selected_parties):
+                show_parties = [p for p in selected_parties if p not in ("democratic", "republican")]
+                major_vals = compute_major(regs)
+                alt_vals = compute_alternative(regs)
+                fig_growth.add_trace(go.Scatter(
+                    x=months, y=_growth(major_vals),
+                    mode="lines", name="Major (Dem + Rep)",
+                    line=dict(color=MAJOR_COLOR, width=2.5),
+                ))
+                fig_growth.add_trace(go.Scatter(
+                    x=months, y=_growth(alt_vals),
+                    mode="lines", name="Alternative",
+                    line=dict(color=ALT_COLOR, width=2.5),
+                ))
+                for p in show_parties:
+                    vals = [r[p] for r in regs]
+                    fig_growth.add_trace(go.Scatter(
+                        x=months, y=_growth(vals),
+                        mode="lines", name=PARTY_LABELS.get(p, p),
+                        line=dict(dash="dot", width=1),
+                    ))
+            else:
+                for p in selected_parties:
+                    vals = [r[p] for r in regs]
+                    fig_growth.add_trace(go.Scatter(
+                        x=months, y=_growth(vals),
+                        mode="lines", name=PARTY_LABELS.get(p, p),
+                        line=dict(color=PARTY_COLORS.get(p), width=1.5),
+                    ))
+
+            fig_growth.update_layout(
+                hovermode="x unified",
+                yaxis=dict(ticksuffix="%"),
+                yaxis_title="Monthly Growth (%)",
+                legend=dict(font=dict(size=10)),
+            )
+            tab2.plotly_chart(fig_growth, width='stretch')
+
+# ── Tab 3: County Comparison ───────────────────────────────────────────────
 
 with tab3:
     county_names = get_county_names()
@@ -218,48 +370,67 @@ with tab3:
         default=["JEFFERSON", "FAYETTE", "KENTON", "BOONE"],
     )
 
-    if selected_counties:
+    if not selected_counties:
+        tab3.info("Select at least one county above.")
+    else:
         county_rows = load_county_stats(selected_counties, from_month, until_month)
+        use_pct = tab3.checkbox("Show as % of county total", value=False)
 
-        fig_county = go.Figure()
-        for cname in selected_counties:
-            cdata = [r for r in county_rows if r["county_name"] == cname]
-            if cdata:
-                fig_county.add_trace(go.Scatter(
+        if group_major_alt and {"democratic", "republican"} & set(selected_parties):
+            tab3.subheader("Major vs Alternative by County")
+            fig_mc = go.Figure()
+            for cname in selected_counties:
+                cdata = [r for r in county_rows if r["county_name"] == cname]
+                if not cdata:
+                    continue
+                major = [r["democratic"] + r["republican"] for r in cdata]
+                alt = [sum(r[p] for p in _alt_parties()) for r in cdata]
+                ctotals = [r["total"] for r in cdata]
+                major_disp = [m / t * 100 for m, t in zip(major, ctotals)] if use_pct else major
+                alt_disp = [a / t * 100 for a, t in zip(alt, ctotals)] if use_pct else alt
+                fig_mc.add_trace(go.Scatter(
                     x=[r["month"] for r in cdata],
-                    y=[r["total"] for r in cdata],
-                    mode="lines", name=cname,
+                    y=major_disp, mode="lines",
+                    name=f"{cname} — Major",
                 ))
-
-        fig_county.update_layout(
-            title="Registration by County",
-            hovermode="x unified",
-            yaxis_title="Voters",
-        )
-        tab3.plotly_chart(fig_county, width='stretch')
-
-        party_choice = tab3.selectbox(
-            "Party Breakdown", ["total"] + PARTIES,
-            format_func=lambda x: "Total" if x == "total" else PARTY_LABELS.get(x, x),
-        )
-
-        fig_county_party = go.Figure()
-        for cname in selected_counties:
-            cdata = [r for r in county_rows if r["county_name"] == cname]
-            if cdata:
-                key = "total" if party_choice == "total" else party_choice
-                fig_county_party.add_trace(go.Scatter(
+                fig_mc.add_trace(go.Scatter(
                     x=[r["month"] for r in cdata],
-                    y=[r[key] for r in cdata],
-                    mode="lines", name=cname,
+                    y=alt_disp, mode="lines",
+                    name=f"{cname} — Alt",
+                    line=dict(dash="dot"),
                 ))
+            fig_mc.update_layout(
+                title="County Comparison — Major vs Alternative",
+                hovermode="x unified",
+                yaxis_title="Share (%)" if use_pct else "Voters",
+                legend=dict(font=dict(size=10)),
+            )
+            tab3.plotly_chart(fig_mc, width='stretch')
 
-        fig_county_party.update_layout(
-            title=f"County Comparison — {'Total' if party_choice == 'total' else PARTY_LABELS.get(party_choice, party_choice)}",
-            hovermode="x unified",
-            yaxis_title="Voters",
-        )
-        tab3.plotly_chart(fig_county_party, width='stretch')
+        if selected_parties:
+            tab3.subheader("Party Breakdown by County")
+            fig_cp = go.Figure()
+            for cname in selected_counties:
+                cdata = [r for r in county_rows if r["county_name"] == cname]
+                if not cdata:
+                    continue
+                ctotals = [r["total"] for r in cdata]
+                for p in selected_parties:
+                    vals = [r[p] for r in cdata]
+                    if use_pct:
+                        vals = [v / t * 100 for v, t in zip(vals, ctotals)]
+                    fig_cp.add_trace(go.Scatter(
+                        x=[r["month"] for r in cdata],
+                        y=vals, mode="lines",
+                        name=f"{cname} — {PARTY_LABELS.get(p, p)}",
+                    ))
+            fig_cp.update_layout(
+                title="County Comparison — Selected Parties",
+                hovermode="x unified",
+                yaxis_title="Share (%)" if use_pct else "Voters",
+                legend=dict(font=dict(size=10)),
+            )
+            tab3.plotly_chart(fig_cp, width='stretch')
 
 with st.expander("Raw Data"):
     st.dataframe(

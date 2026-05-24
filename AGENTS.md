@@ -97,15 +97,22 @@ python3 -m ky_voter_tracker.main --scrape --download --parse
 streamlit run ky_voter_tracker/dashboard.py
 ```
 
+## Work Rhythm
+
+- **Stop after each step** for manual verification before proceeding to the next.
+- Do not batch multiple steps in one session without explicit user approval.
+- After completing a step, present a summary of what was done and the options for what to do next. Let the user choose.
+
 ## Implementation Status
 
 - Step 1 ✅ — Scaffold complete (pyproject.toml, .gitignore, package dirs)
 - Step 2 ✅ — Scraper complete (437 links parsed, 21 tests)
 - Step 3 ✅ — Database Layer (registrations + county_stats + downloads_log, 14 tests)
-- Step 4 🔲 — Downloader
-- Step 5 🔲 — XLS Parser
-- Step 6 🔲 — Main Pipeline
-- Step 7–10 🔲 — Dashboard (Phase 2)
+- Step 4 ✅ — Downloader (incremental, retry 3x with backoff, 6 tests)
+- Step 5 ✅ — XLS Parser (county + statewide extraction, 11 tests + real-file integration)
+- Step 6 ✅ — Main Pipeline (argparse CLI, scrape → download → parse → store)
+- Step 7 🔲 — Dashboard shell (intentionally left unmarked; created out of order — needs UX review)
+- Step 8–10 🔲 — Dashboard refinements
 - Step 11–16 🔲 — PDF Parsing & Extensions
 - Step 17–19 🔲 — Hardening
 
