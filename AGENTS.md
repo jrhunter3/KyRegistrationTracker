@@ -111,10 +111,17 @@ streamlit run ky_voter_tracker/dashboard.py
 - Step 4 ✅ — Downloader (incremental, retry 3x with backoff, 6 tests)
 - Step 5 ✅ — XLS Parser (county + statewide extraction, 11 tests + real-file integration)
 - Step 6 ✅ — Main Pipeline (argparse CLI, scrape → download → parse → store)
-- Step 7 🔲 — Dashboard shell (intentionally left unmarked; created out of order — needs UX review)
-- Step 8–10 🔲 — Dashboard refinements
-- Step 11–16 🔲 — PDF Parsing & Extensions
-- Step 17–19 🔲 — Hardening
+- Step 7  🟡 — Dashboard shell (built, needs UX review — user wants dynamic/selectable approach)
+- Step 8a ✅ — Sidebar party multi-select + view mode toggle (Raw/Share %)
+- Step 8b 🔲 — Dynamic metric cards (show all selected parties, month-over-month delta)
+- Step 9a ✅ — Party Comparison tab (overlaid lines / stacked area / stacked area %, Major vs Alternative grouping)
+- Step 9b ✅ — Month-over-month growth rate chart per party
+- Step 10a ✅ — County Comparison tab (party selection from sidebar, % of county total toggle)
+- Step 10b 🔲 — Layout polish (export buttons, data table, responsive tuning)
+- Step YoY 🔲 — Year-over-year comparison chart (user showed interest after MoM growth chart)
+- Step 11–13 🔲 — PDF Parsing (county / district / precinct)
+- Step 14–16 🔲 — Dashboard extensions (choropleth, district views, precinct views)
+- Step 17–19 🔲 — Hardening (--from/--until flags, coverage, CI)
 
 See `IMPLEMENTATION_PLAN.md` and `TODO.md` for full details.
 

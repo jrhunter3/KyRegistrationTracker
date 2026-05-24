@@ -27,6 +27,8 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--scrape", action="store_true", help="Fetch download links from KY SBE site")
     parser.add_argument("--download", action="store_true", help="Download new XLS files")
     parser.add_argument("--parse", action="store_true", help="Parse downloaded XLS files into database")
+    parser.add_argument("--download-pdf", action="store_true", help="Download new PDF files")
+    parser.add_argument("--parse-pdf", action="store_true", help="Parse downloaded PDF files into database")
     parser.add_argument("--all", action="store_true", help="Run full pipeline (scrape + download + parse)")
     parser.add_argument("--refresh", action="store_true", help="Re-download and re-parse all files")
     return parser.parse_args()
@@ -53,6 +55,64 @@ def main() -> None:
         new_files = downloader.download_files(conn, xls_links, force=args.refresh)
         print(f"  Downloaded {len(new_files)} files")
 
+    if args.download_pdf:
+        if links is None:
+            links = scraper.get_download_links()
+        pdf_links = [link for link in links if link["category"] in ("county", "district", "precinct")]
+        print(f"Downloading PDF files (force={args.refresh})...")
+        new_files = downloader.download_files(conn, pdf_links, force=args.refresh)
+        print(f"  Downloaded {len(new_files)} files")
+
+    if args.parse_pdf:
+        if links is None:
+            links = scraper.get_download_links()
+        link_by_filename = {link["filename"]: link for link in links}
+
+        if args.refresh:
+            print("Resetting parse flags for refresh...")
+            db.reset_parsed_flags(conn)
+
+        unparsed = db.get_unparsed_files(conn)
+        pdf_unparsed = [
+            e for e in unparsed
+            if link_by_filename.get(e["filename"], {}).get("file_type") == "pdf"
+        ]
+        if not pdf_unparsed:
+            print("No PDF files to parse")
+        else:
+            rows_county_pdf = 0
+            for entry in pdf_unparsed:
+                filename = entry["filename"]
+                filepath = os.path.join(downloader.RAW_DIR, filename)
+                if not os.path.exists(filepath):
+                    continue
+
+                link = link_by_filename.get(filename)
+                if link is None or link["month"] is None:
+                    continue
+
+                cat = link.get("category")
+                month = link["month"]
+                print(f"  Parsing {filename} ({month}, {cat})...", end=" ")
+
+                if cat == "county":
+                    statewide, counties = parser.parse_county_pdf(filepath, month)
+                    for c in counties:
+                        co_kwargs = {k: v for k, v in c.items() if k in COUNTY_FIELDS}
+                        db.insert_county_stats(conn, **co_kwargs)
+                        rows_county_pdf += 1
+                    if statewide is not None:
+                        reg_kwargs = {k: v for k, v in statewide.items() if k in REG_FIELDS}
+                        db.insert_registration(conn, **reg_kwargs)
+                    print(f"{len(counties)} counties")
+                else:
+                    print("skipped (not yet implemented)")
+                    continue
+
+                db.mark_parsed(conn, link["url"])
+
+            print(f"  Inserted {rows_county_pdf} county rows from PDFs")
+
     if args.parse or run_all:
         if links is None:
             links = scraper.get_download_links()
@@ -76,6 +136,8 @@ def main() -> None:
 
                 link = link_by_filename.get(filename)
                 if link is None or link["month"] is None:
+                    continue
+                if link.get("file_type") != "xls":
                     continue
 
                 month = link["month"]

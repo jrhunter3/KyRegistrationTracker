@@ -14,6 +14,7 @@ dependencies = [
     "streamlit>=1.28",
     "plotly>=5.18",
     "lxml>=5.0",
+    "pdfplumber>=0.11",
 ]
 
 [project.optional-dependencies]
