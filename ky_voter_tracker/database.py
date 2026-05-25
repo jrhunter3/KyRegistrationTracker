@@ -212,6 +212,14 @@ def get_county_stats(
     return conn.execute(query, params).fetchall()
 
 
+def delete_precinct_stats_by_month(conn: sqlite3.Connection, month: str) -> None:
+    conn.execute(
+        "DELETE FROM precinct_stats WHERE month = ?",
+        (month,),
+    )
+    conn.commit()
+
+
 def insert_precinct_stats(
     conn: sqlite3.Connection,
     month: str,

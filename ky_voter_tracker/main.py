@@ -114,6 +114,7 @@ def main() -> None:
                         db.insert_registration(conn, **reg_kwargs)
                     print(f"{len(counties)} counties")
                 elif cat == "precinct":
+                    db.delete_precinct_stats_by_month(conn, month)
                     prec_rows = parser.parse_precinct_pdf(filepath, month)
                     for r in prec_rows:
                         pr_kwargs = {k: v for k, v in r.items() if k in PRECINCT_FIELDS}
