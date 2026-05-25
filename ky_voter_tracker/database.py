@@ -426,3 +426,15 @@ def reset_parsed_flags(conn: sqlite3.Connection) -> None:
         "UPDATE downloads_log SET parsed = 0, status = 'downloaded' WHERE status = 'parsed'"
     )
     conn.commit()
+
+
+def reset_parsed_flags_for_urls(conn: sqlite3.Connection, urls: list[str]) -> None:
+    if not urls:
+        return
+    placeholders = ",".join("?" for _ in urls)
+    conn.execute(
+        f"UPDATE downloads_log SET parsed = 0, status = 'downloaded' "
+        f"WHERE url IN ({placeholders}) AND status = 'parsed'",
+        urls,
+    )
+    conn.commit()

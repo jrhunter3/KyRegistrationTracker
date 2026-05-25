@@ -99,9 +99,12 @@ streamlit run ky_voter_tracker/dashboard.py
 
 ## Work Rhythm
 
-- **Stop after each step** for manual verification before proceeding to the next.
-- Do not batch multiple steps in one session without explicit user approval.
-- After completing a step, present a summary of what was done and the options for what to do next. Let the user choose.
+1. **Plan together** — I help identify and lay out possible changes.
+2. **Propose a shortlist** — I recommend 2-3 concrete changes to tackle next.
+3. **You approve** — You pick which ones to proceed with.
+4. **I implement** — I execute the approved changes.
+5. **You review** — You assess what was done.
+6. **Pass → repeat from step 1.** Reject → we undo or fix before continuing.
 
 ## Implementation Status
 
@@ -143,20 +146,27 @@ Dashboard county/district/precinct views also deferred to Phase 2.
 
 ---
 
-## Session Context (2026-05-25)
+## Session Context (2026-05-25) — Session 3
 
 ### What was completed this session
-- **Precinct duplicate fix:** Added `delete_precinct_stats_by_month()` in `database.py`, called before precinct insert in `main.py`. Re-parsed 3 affected months (2022-04, 2023-01, 2023-11). HOPKINS and JEFFERSON discrepancies resolved — all months now match county totals.
-- **Step 12 (District PDF Parser):** Built `parse_district_pdf()` — handles 4 section types (congressional/house/senate/supreme_court) from multi-page PDFs. Created `district_stats` table with `UNIQUE(month, district_type, district_number)`. 108 PDFs parsed → 14,953 rows.
-- **Senior citizen district fix:** Kentucky includes "Senior Citizen" districts that share numbers with standard house districts (e.g., `035` vs `35`). Fixed by preserving raw district number formatting (including leading zeros) instead of normalizing with `str(int(...))`. All 4 district type sums now match registration totals exactly.
-- **Known remaining issue:** `pdfplumber` occasionally skips lines (e.g., district 093 missing in 2022-03 house). This is a tool limitation — affects <0.1% of rows.
+- **Step 17 hardening:** Added `--from`/`--until` CLI flags (`_filter_links_by_month()` in `main.py`). Filters apply to scrape, download, and parse phases. Works with `--refresh` — only resets parsed flags for in-range files.
+- **`reset_parsed_flags_for_urls()`** in `database.py`: selectively resets parsed flags for given URL list using parameterized `IN` clause.
+- **14 new tests:** 7 for `_filter_links_by_month`, 4 for `_parse_args`, 3 for `reset_parsed_flags_for_urls`. Total: 105 tests.
 
 ### Files changed
-- `ky_voter_tracker/database.py` — Added `district_stats` table, `delete_precinct_stats_by_month()`, `insert_district_stats()`, `get_district_stats()`, `delete_district_stats_by_month()`
-- `ky_voter_tracker/parser.py` — Added `parse_district_pdf()`, `SECTION_HEADERS`, `DISTRICT_DATA_KEYS`; fixed district number to raw text
-- `ky_voter_tracker/main.py` — Added district handler, `DISTRICT_FIELDS`, district row tracking in summary
+- `ky_voter_tracker/main.py` — `--from`/`--until` args, `_filter_links_by_month()`, conditional `reset_parsed_flags` / `reset_parsed_flags_for_urls` per phase, `_parse_args` accepts optional argv for testing
+- `ky_voter_tracker/database.py` — `reset_parsed_flags_for_urls()`
+- `ky_voter_tracker/tests/test_main.py` — new file: `TestFilterLinksByMonth` (7 tests), `TestParseArgs` (4 tests)
+- `ky_voter_tracker/tests/test_database.py` — `TestResetParsedFlagsForUrls` (3 tests)
+- `.gitignore` — already updated in session 2
+- `AGENTS.md`, `TODO.md` — session tracking
+
+### Known issues
+- District 093 in 2022-03 house section was genuinely missing from the source PDF (KY SBE generation error), not a pdfplumber bug. Affects ~0 voters in that specific month.
+- Senior citizen house districts (2-digit numbers like `35`, `17`) preserved alongside standard zero-padded counterparts (`035`, `017`) — 5 such rows across all months.
+- `scraper.py` retry edge cases (all-retries-fail path, no-extension filename) not covered in tests.
 
 ### Next steps (choose one)
-1. **Dashboard extensions:** YoY comparison chart, dynamic metric cards with MoM delta, choropleth map
+1. **Dashboard extensions:** YoY comparison chart, metric cards with MoM delta, choropleth map
 2. **Step 14:** County dashboard views (choropleth map, county-level MoM growth)
-3. **Hardening:** `--from`/`--until` CLI flags, test coverage >80%, CI config
+3. **Step 18:** CI config (GitHub Actions)

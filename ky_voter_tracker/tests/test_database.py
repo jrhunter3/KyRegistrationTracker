@@ -16,6 +16,7 @@ from ky_voter_tracker.database import (
     get_downloaded_urls,
     get_unparsed_files,
     reset_parsed_flags,
+    reset_parsed_flags_for_urls,
 )
 
 
@@ -392,6 +393,56 @@ class TestResetParsedFlags:
         conn = _memory_db()
         mark_downloaded(conn, "https://example.com/a.xls", "a.xls", status="failed")
         reset_parsed_flags(conn)
+        row = conn.execute(
+            "SELECT status FROM downloads_log WHERE url = ?",
+            ("https://example.com/a.xls",),
+        ).fetchone()
+        assert row["status"] == "failed"
+
+
+class TestResetParsedFlagsForUrls:
+    def test_resets_selected_urls_only(self):
+        conn = _memory_db()
+        urls = [f"https://example.com/{i}.xls" for i in range(3)]
+        for i, url in enumerate(urls):
+            mark_downloaded(conn, url, f"{i}.xls")
+            mark_parsed(conn, url)
+        mark_downloaded(conn, "https://example.com/other.xls", "other.xls")
+        mark_parsed(conn, "https://example.com/other.xls")
+
+        reset_parsed_flags_for_urls(conn, urls[:2])
+
+        for url in urls[:2]:
+            row = conn.execute(
+                "SELECT status, parsed FROM downloads_log WHERE url = ?", (url,)
+            ).fetchone()
+            assert row["status"] == "downloaded"
+            assert row["parsed"] == 0
+        row = conn.execute(
+            "SELECT status FROM downloads_log WHERE url = ?", (urls[2],)
+        ).fetchone()
+        assert row["status"] == "parsed"
+        row = conn.execute(
+            "SELECT status FROM downloads_log WHERE url = ?",
+            ("https://example.com/other.xls",),
+        ).fetchone()
+        assert row["status"] == "parsed"
+
+    def test_empty_urls_does_nothing(self):
+        conn = _memory_db()
+        mark_downloaded(conn, "https://example.com/a.xls", "a.xls")
+        mark_parsed(conn, "https://example.com/a.xls")
+        reset_parsed_flags_for_urls(conn, [])
+        row = conn.execute(
+            "SELECT status FROM downloads_log WHERE url = ?",
+            ("https://example.com/a.xls",),
+        ).fetchone()
+        assert row["status"] == "parsed"
+
+    def test_only_resets_parsed_files(self):
+        conn = _memory_db()
+        mark_downloaded(conn, "https://example.com/a.xls", "a.xls", status="failed")
+        reset_parsed_flags_for_urls(conn, ["https://example.com/a.xls"])
         row = conn.execute(
             "SELECT status FROM downloads_log WHERE url = ?",
             ("https://example.com/a.xls",),

@@ -34,7 +34,7 @@ DISTRICT_FIELDS = {
 }
 
 
-def _parse_args() -> argparse.Namespace:
+def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Kentucky Voter Registration Tracker"
     )
@@ -45,7 +45,31 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--parse-pdf", action="store_true", help="Parse downloaded PDF files into database")
     parser.add_argument("--all", action="store_true", help="Run full pipeline (scrape + download + parse)")
     parser.add_argument("--refresh", action="store_true", help="Re-download and re-parse all files")
-    return parser.parse_args()
+    parser.add_argument("--from", type=str, dest="from_month", default=None,
+                        help="Lower bound month (YYYY-MM) for scrape/download/parse")
+    parser.add_argument("--until", type=str, dest="until_month", default=None,
+                        help="Upper bound month (YYYY-MM) for scrape/download/parse")
+    return parser.parse_args(argv)
+
+
+def _filter_links_by_month(
+    links: list[dict],
+    from_month: str | None,
+    until_month: str | None,
+) -> list[dict]:
+    if from_month is None and until_month is None:
+        return links
+    result = []
+    for link in links:
+        m = link.get("month")
+        if m is None:
+            continue
+        if from_month is not None and m < from_month:
+            continue
+        if until_month is not None and m > until_month:
+            continue
+        result.append(link)
+    return result
 
 
 def main() -> None:
@@ -58,12 +82,16 @@ def main() -> None:
     if args.scrape or run_all:
         print("Scraping download links...")
         links = scraper.get_download_links()
+        if args.from_month or args.until_month:
+            links = _filter_links_by_month(links, args.from_month, args.until_month)
         xls_count = sum(1 for link in links if link["file_type"] == "xls")
         print(f"  Found {len(links)} total links ({xls_count} XLS files)")
 
     if args.download or run_all:
         if links is None:
             links = scraper.get_download_links()
+            if args.from_month or args.until_month:
+                links = _filter_links_by_month(links, args.from_month, args.until_month)
         xls_links = [link for link in links if link["file_type"] == "xls"]
         print(f"Downloading XLS files (force={args.refresh})...")
         new_files = downloader.download_files(conn, xls_links, force=args.refresh)
@@ -72,6 +100,8 @@ def main() -> None:
     if args.download_pdf:
         if links is None:
             links = scraper.get_download_links()
+            if args.from_month or args.until_month:
+                links = _filter_links_by_month(links, args.from_month, args.until_month)
         pdf_links = [link for link in links if link["category"] in ("county", "district", "precinct")]
         print(f"Downloading PDF files (force={args.refresh})...")
         new_files = downloader.download_files(conn, pdf_links, force=args.refresh)
@@ -80,11 +110,18 @@ def main() -> None:
     if args.parse_pdf:
         if links is None:
             links = scraper.get_download_links()
+            if args.from_month or args.until_month:
+                links = _filter_links_by_month(links, args.from_month, args.until_month)
         link_by_filename = {link["filename"]: link for link in links}
 
         if args.refresh:
-            print("Resetting parse flags for refresh...")
-            db.reset_parsed_flags(conn)
+            if args.from_month or args.until_month:
+                target_urls = [link["url"] for link in links]
+                print(f"Resetting parse flags for {len(target_urls)} files in range...")
+                db.reset_parsed_flags_for_urls(conn, target_urls)
+            else:
+                print("Resetting parse flags for refresh...")
+                db.reset_parsed_flags(conn)
 
         unparsed = db.get_unparsed_files(conn)
         pdf_unparsed = [
@@ -151,11 +188,18 @@ def main() -> None:
     if args.parse or run_all:
         if links is None:
             links = scraper.get_download_links()
+            if args.from_month or args.until_month:
+                links = _filter_links_by_month(links, args.from_month, args.until_month)
         link_by_filename = {link["filename"]: link for link in links}
 
         if args.refresh:
-            print("Resetting parse flags for refresh...")
-            db.reset_parsed_flags(conn)
+            if args.from_month or args.until_month:
+                target_urls = [link["url"] for link in links]
+                print(f"Resetting parse flags for {len(target_urls)} files in range...")
+                db.reset_parsed_flags_for_urls(conn, target_urls)
+            else:
+                print("Resetting parse flags for refresh...")
+                db.reset_parsed_flags(conn)
 
         unparsed = db.get_unparsed_files(conn)
         if not unparsed:
