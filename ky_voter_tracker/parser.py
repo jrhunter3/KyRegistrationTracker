@@ -317,3 +317,73 @@ def parse_precinct_pdf(
                 rows.append(d)
 
     return rows
+
+
+SECTION_HEADERS = {
+    "congressional districts": "congressional",
+    "house districts": "house",
+    "senate districts": "senate",
+    "supreme court districts": "supreme_court",
+}
+
+DISTRICT_DATA_KEYS = [
+    "democratic", "republican", "other",
+    "independent", "libertarian", "green", "constitution",
+    "reform", "socialist_workers",
+    "male", "female", "total",
+]
+
+
+def parse_district_pdf(filepath: str, month: str) -> list[dict]:
+    rows: list[dict] = []
+    current_district_type = None
+
+    with pdfplumber.open(filepath) as pdf:
+        for page in pdf.pages:
+            text = page.extract_text(x_tolerance=1)
+            for line in text.split("\n"):
+                stripped = line.strip()
+                if not stripped:
+                    continue
+
+                parts = stripped.split()
+
+                lower_line = stripped.lower()
+                if lower_line in SECTION_HEADERS:
+                    current_district_type = SECTION_HEADERS[lower_line]
+                    continue
+
+                if parts[0].lower() in ("statewide", "district"):
+                    continue
+
+                if not parts[0].isdigit():
+                    continue
+
+                if current_district_type is None:
+                    continue
+
+                if len(parts) < 13:
+                    continue
+
+                district_number = parts[0]
+                vals = _to_ints(parts[-12:])
+
+                d: dict = {
+                    "month": month,
+                    "district_type": current_district_type,
+                    "district_number": district_number,
+                    "source_file": filepath,
+                }
+
+                for idx, key in enumerate(DISTRICT_DATA_KEYS):
+                    if idx < len(vals):
+                        d[key] = vals[idx]
+
+                for col in PARTY_COLS:
+                    d.setdefault(col, 0)
+                d.setdefault("male", 0)
+                d.setdefault("female", 0)
+
+                rows.append(d)
+
+    return rows

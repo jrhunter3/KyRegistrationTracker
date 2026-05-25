@@ -26,6 +26,13 @@ PRECINCT_FIELDS = {
     "kentucky_party", "male", "female", "total", "source_file",
 }
 
+DISTRICT_FIELDS = {
+    "month", "district_type", "district_number",
+    "democratic", "republican", "other", "independent", "libertarian",
+    "green", "constitution", "reform", "socialist_workers",
+    "kentucky_party", "male", "female", "total", "source_file",
+}
+
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -89,6 +96,7 @@ def main() -> None:
         else:
             rows_county_pdf = 0
             rows_precinct = 0
+            rows_district = 0
             for entry in pdf_unparsed:
                 filename = entry["filename"]
                 filepath = os.path.join(downloader.RAW_DIR, filename)
@@ -121,12 +129,21 @@ def main() -> None:
                         db.insert_precinct_stats(conn, **pr_kwargs)
                         rows_precinct += 1
                     print(f"{len(prec_rows)} precincts")
+                elif cat == "district":
+                    rows_district = 0
+                    db.delete_district_stats_by_month(conn, month)
+                    dist_rows = parser.parse_district_pdf(filepath, month)
+                    for r in dist_rows:
+                        di_kwargs = {k: v for k, v in r.items() if k in DISTRICT_FIELDS}
+                        db.insert_district_stats(conn, **di_kwargs)
+                        rows_district += 1
+                    print(f"{len(dist_rows)} districts")
                 else:
                     print("skipped (not yet implemented)")
 
                 db.mark_parsed(conn, link["url"])
 
-            print(f"  Inserted {rows_county_pdf} county rows, {rows_precinct} precinct rows from PDFs")
+            print(f"  Inserted {rows_county_pdf} county rows, {rows_precinct} precinct rows, {rows_district} district rows from PDFs")
 
     if args.parse or run_all:
         if links is None:
