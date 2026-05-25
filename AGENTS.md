@@ -119,7 +119,9 @@ streamlit run ky_voter_tracker/dashboard.py
 - Step 10a ✅ — County Comparison tab (party selection from sidebar, % of county total toggle)
 - Step 10b 🔲 — Layout polish (export buttons, data table, responsive tuning)
 - Step YoY 🔲 — Year-over-year comparison chart (user showed interest after MoM growth chart)
-- Step 11–13 🔲 — PDF Parsing (county / district / precinct)
+- Step 11 ✅ — County PDF Parser (110 PDFs → 12,120 rows, line-based text extraction)
+- Step 12 🔲 — District PDF Parsing
+- Step 13 ✅ — Precinct PDF Parser (110 PDFs → 359,685 rows, 12/13-col format, span-line C-S-LD-SC)
 - Step 14–16 🔲 — Dashboard extensions (choropleth, district views, precinct views)
 - Step 17–19 🔲 — Hardening (--from/--until flags, coverage, CI)
 
@@ -138,3 +140,27 @@ Dashboard county/district/precinct views also deferred to Phase 2.
 - Python 3.10+
 - Dependencies in `pyproject.toml` (install: `pip install -e ".[dev]"`)
 - No Docker, no external services, no secrets
+
+---
+
+## Session Context (2026-05-24)
+
+### What was completed this session
+- **Step 13 (Precinct PDF Parser):** All 110 precinct PDFs parsed and loaded into `precinct_stats` table (359,685 rows).
+- **C-S-LD-SC span-line fix:** `voterstatsprecinct- April 2026.pdf` had C-S-LD-SC codes split across two lines (e.g., `1-16-021-` on one line, `3` on the next). Fixed by peeking at the next line when trailing hyphen is detected.
+- **Validation:** 99.98% match (12,118 of 12,120 county-months match between precinct sums and county totals).
+
+### Known issue — Duplicate precinct PDFs per month
+**Root cause:** 3 months (2022-04, 2023-01, 2023-11) have two precinct PDFs each (different snapshot dates, same month label). The UNIQUE(month, county_code, precinct) constraint overwrites matching precincts, but orphan precincts unique to the earlier PDF persist.
+
+**Affected:** HOPKINS (2022-04, off by +2,971) and JEFFERSON (2023-01, off by +3,957).
+
+**Fix (deferred to next session):**
+1. In `parser.py`, at the start of `parse_precinct_pdf()`, before inserting rows for a month, delete existing `precinct_stats` rows for that month.
+2. Re-run `python3 -m ky_voter_tracker.main --parse-pdf` to re-parse all precinct PDFs.
+3. Verify with: `SELECT month, county_code, SUM(total) as p_total FROM precinct_stats GROUP BY month, county_code` vs county_stats.
+
+### Next steps (choose one)
+1. **Fix the duplicate-precinct issue** (first priority — ~1 minute code change + ~30 min re-parse)
+2. **Step 12:** District PDF parser
+3. **Dashboard:** YoY comparison chart, metric cards, layout polish

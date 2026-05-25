@@ -19,6 +19,13 @@ COUNTY_FIELDS = {
     "kentucky_party", "male", "female", "total", "source_file",
 }
 
+PRECINCT_FIELDS = {
+    "month", "county_code", "county_name", "precinct", "c_s_ld_sc",
+    "democratic", "republican", "other", "independent", "libertarian",
+    "green", "constitution", "reform", "socialist_workers",
+    "kentucky_party", "male", "female", "total", "source_file",
+}
+
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -81,6 +88,7 @@ def main() -> None:
             print("No PDF files to parse")
         else:
             rows_county_pdf = 0
+            rows_precinct = 0
             for entry in pdf_unparsed:
                 filename = entry["filename"]
                 filepath = os.path.join(downloader.RAW_DIR, filename)
@@ -105,12 +113,19 @@ def main() -> None:
                         reg_kwargs = {k: v for k, v in statewide.items() if k in REG_FIELDS}
                         db.insert_registration(conn, **reg_kwargs)
                     print(f"{len(counties)} counties")
+                elif cat == "precinct":
+                    prec_rows = parser.parse_precinct_pdf(filepath, month)
+                    for r in prec_rows:
+                        pr_kwargs = {k: v for k, v in r.items() if k in PRECINCT_FIELDS}
+                        db.insert_precinct_stats(conn, **pr_kwargs)
+                        rows_precinct += 1
+                    print(f"{len(prec_rows)} precincts")
                 else:
                     print("skipped (not yet implemented)")
 
                 db.mark_parsed(conn, link["url"])
 
-            print(f"  Inserted {rows_county_pdf} county rows from PDFs")
+            print(f"  Inserted {rows_county_pdf} county rows, {rows_precinct} precinct rows from PDFs")
 
     if args.parse or run_all:
         if links is None:
