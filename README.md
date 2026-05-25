@@ -38,17 +38,14 @@ ky_voter_tracker/
 ## Quick Start
 
 ```bash
-# Clone and enter the project
-git clone <repo-url> && cd ky_voter_tracker
-
-# Install dependencies
-pip install -e .
+# Install dependencies (from repo root)
+pip install -e ".[dev]"
 
 # Run the full pipeline (scrape → download → parse → store)
-python main.py
+python3 -m ky_voter_tracker.main
 
 # Launch the interactive dashboard
-streamlit run dashboard.py
+streamlit run ky_voter_tracker/dashboard.py
 ```
 
 ## Requirements

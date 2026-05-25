@@ -1,4 +1,6 @@
+import json
 import sqlite3
+import urllib.request
 
 import plotly.express as px
 import plotly.graph_objects as go
@@ -46,6 +48,29 @@ def load_registrations(from_month: str, until_month: str) -> list[sqlite3.Row]:
            WHERE month >= ? AND month <= ?
            ORDER BY month ASC""",
         (from_month, until_month),
+    ).fetchall()
+
+
+@st.cache_data
+def _load_ky_geojson() -> dict | None:
+    url = "https://raw.githubusercontent.com/plotly/datasets/master/geojson-counties-fips.json"
+    try:
+        with urllib.request.urlopen(url, timeout=10) as resp:
+            all_counties = json.loads(resp.read().decode())
+    except Exception:
+        return None
+    features = [f for f in all_counties["features"] if f["id"].startswith("21")]
+    return {"type": "FeatureCollection", "features": features}
+
+
+def load_single_month_county_stats(month: str) -> list[sqlite3.Row]:
+    conn = get_conn()
+    return conn.execute(
+        """SELECT *, CAST(21001 + (CAST(county_code AS INTEGER) - 1) * 2 AS TEXT) AS fips
+           FROM county_stats
+           WHERE month = ?
+           ORDER BY county_code ASC""",
+        (month,),
     ).fetchall()
 
 
@@ -363,6 +388,45 @@ with tab2:
 # ── Tab 3: County Comparison ───────────────────────────────────────────────
 
 with tab3:
+    use_pct = tab3.checkbox("Show as % of county total", value=False)
+
+    ky_geojson = _load_ky_geojson()
+    if ky_geojson is not None and regs:
+        all_months = [r["month"] for r in regs]
+        map_month = tab3.select_slider(
+            "Map month",
+            options=all_months,
+            value=all_months[-1],
+        )
+        cm_data = load_single_month_county_stats(map_month)
+        cm_rows = [dict(r) for r in cm_data] if cm_data else []
+        if cm_rows and selected_parties:
+            map_party = selected_parties[0]
+            if len(selected_parties) > 1:
+                map_party = tab3.selectbox(
+                    "Map party", options=selected_parties,
+                    format_func=lambda p: PARTY_LABELS.get(p, p),
+                    index=0,
+                )
+            map_vals = [r[map_party] for r in cm_rows]
+            if use_pct:
+                map_vals = [v / r["total"] * 100 for v, r in zip(map_vals, cm_rows)]
+            fig_map = go.Figure(go.Choropleth(
+                geojson=ky_geojson,
+                locations=[r["fips"] for r in cm_rows],
+                z=map_vals,
+                text=[r["county_name"] for r in cm_rows],
+                colorscale="Blues",
+                colorbar_title=PARTY_LABELS.get(map_party, map_party),
+                hovertemplate="%{text}<br>%{z:,.0f}" + ("%" if use_pct else ""),
+            ))
+            fig_map.update_geos(fitbounds="locations", visible=False)
+            fig_map.update_layout(
+                title=f"{PARTY_LABELS.get(map_party, map_party)} — {map_month}",
+                height=500, margin=dict(l=0, r=0, t=30, b=0),
+            )
+            tab3.plotly_chart(fig_map, width='stretch')
+
     county_names = get_county_names()
     selected_counties = tab3.multiselect(
         "Select Counties",
@@ -374,7 +438,6 @@ with tab3:
         tab3.info("Select at least one county above.")
     else:
         county_rows = load_county_stats(selected_counties, from_month, until_month)
-        use_pct = tab3.checkbox("Show as % of county total", value=False)
 
         if group_major_alt and {"democratic", "republican"} & set(selected_parties):
             tab3.subheader("Major vs Alternative by County")
