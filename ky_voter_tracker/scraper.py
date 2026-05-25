@@ -1,4 +1,5 @@
 import re
+import time
 from typing import Optional
 from urllib.parse import unquote
 
@@ -15,6 +16,9 @@ HEADERS = {
         "Chrome/120.0.0.0 Safari/537.36"
     ),
 }
+
+RETRIES = 3
+BACKOFF = [1, 2, 4]
 
 MONTH_MAP = {
     "january": 1, "february": 2, "march": 3, "april": 4,
@@ -80,8 +84,18 @@ def _parse_date_from_filename(filename: str) -> Optional[str]:
 
 
 def get_download_links() -> list[dict]:
-    resp = requests.get(URL, headers=HEADERS, timeout=60)
-    resp.raise_for_status()
+    last_exc = None
+    for attempt in range(RETRIES):
+        try:
+            resp = requests.get(URL, headers=HEADERS, timeout=60)
+            resp.raise_for_status()
+            break
+        except requests.RequestException as e:
+            last_exc = e
+            if attempt < RETRIES - 1:
+                time.sleep(BACKOFF[attempt])
+    else:
+        raise last_exc  # type: ignore[misc]
 
     soup = BeautifulSoup(resp.content, "lxml")
     links = []

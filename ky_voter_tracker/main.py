@@ -111,37 +111,40 @@ def main() -> None:
                 month = link["month"]
                 print(f"  Parsing {filename} ({month}, {cat})...", end=" ")
 
-                if cat == "county":
-                    statewide, counties = parser.parse_county_pdf(filepath, month)
-                    for c in counties:
-                        co_kwargs = {k: v for k, v in c.items() if k in COUNTY_FIELDS}
-                        db.insert_county_stats(conn, **co_kwargs)
-                        rows_county_pdf += 1
-                    if statewide is not None:
-                        reg_kwargs = {k: v for k, v in statewide.items() if k in REG_FIELDS}
-                        db.insert_registration(conn, **reg_kwargs)
-                    print(f"{len(counties)} counties")
-                elif cat == "precinct":
-                    db.delete_precinct_stats_by_month(conn, month)
-                    prec_rows = parser.parse_precinct_pdf(filepath, month)
-                    for r in prec_rows:
-                        pr_kwargs = {k: v for k, v in r.items() if k in PRECINCT_FIELDS}
-                        db.insert_precinct_stats(conn, **pr_kwargs)
-                        rows_precinct += 1
-                    print(f"{len(prec_rows)} precincts")
-                elif cat == "district":
-                    rows_district = 0
-                    db.delete_district_stats_by_month(conn, month)
-                    dist_rows = parser.parse_district_pdf(filepath, month)
-                    for r in dist_rows:
-                        di_kwargs = {k: v for k, v in r.items() if k in DISTRICT_FIELDS}
-                        db.insert_district_stats(conn, **di_kwargs)
-                        rows_district += 1
-                    print(f"{len(dist_rows)} districts")
-                else:
-                    print("skipped (not yet implemented)")
+                try:
+                    if cat == "county":
+                        statewide, counties = parser.parse_county_pdf(filepath, month)
+                        for c in counties:
+                            co_kwargs = {k: v for k, v in c.items() if k in COUNTY_FIELDS}
+                            db.insert_county_stats(conn, **co_kwargs)
+                            rows_county_pdf += 1
+                        if statewide is not None:
+                            reg_kwargs = {k: v for k, v in statewide.items() if k in REG_FIELDS}
+                            db.insert_registration(conn, **reg_kwargs)
+                        print(f"{len(counties)} counties")
+                    elif cat == "precinct":
+                        db.delete_precinct_stats_by_month(conn, month)
+                        prec_rows = parser.parse_precinct_pdf(filepath, month)
+                        for r in prec_rows:
+                            pr_kwargs = {k: v for k, v in r.items() if k in PRECINCT_FIELDS}
+                            db.insert_precinct_stats(conn, **pr_kwargs)
+                            rows_precinct += 1
+                        print(f"{len(prec_rows)} precincts")
+                    elif cat == "district":
+                        rows_district = 0
+                        db.delete_district_stats_by_month(conn, month)
+                        dist_rows = parser.parse_district_pdf(filepath, month)
+                        for r in dist_rows:
+                            di_kwargs = {k: v for k, v in r.items() if k in DISTRICT_FIELDS}
+                            db.insert_district_stats(conn, **di_kwargs)
+                            rows_district += 1
+                        print(f"{len(dist_rows)} districts")
+                    else:
+                        print("skipped (not yet implemented)")
 
-                db.mark_parsed(conn, link["url"])
+                    db.mark_parsed(conn, link["url"])
+                except Exception as e:
+                    print(f"ERROR: {e}")
 
             print(f"  Inserted {rows_county_pdf} county rows, {rows_precinct} precinct rows, {rows_district} district rows from PDFs")
 
@@ -174,19 +177,23 @@ def main() -> None:
 
                 month = link["month"]
                 print(f"  Parsing {filename} ({month})...", end=" ")
-                statewide, counties = parser.parse_xls(filepath, month)
 
-                reg_kwargs = {k: v for k, v in statewide.items() if k in REG_FIELDS}
-                db.insert_registration(conn, **reg_kwargs)
-                rows_reg += 1
+                try:
+                    statewide, counties = parser.parse_xls(filepath, month)
 
-                for c in counties:
-                    co_kwargs = {k: v for k, v in c.items() if k in COUNTY_FIELDS}
-                    db.insert_county_stats(conn, **co_kwargs)
-                    rows_county += 1
+                    reg_kwargs = {k: v for k, v in statewide.items() if k in REG_FIELDS}
+                    db.insert_registration(conn, **reg_kwargs)
+                    rows_reg += 1
 
-                db.mark_parsed(conn, link["url"])
-                print(f"{len(counties)} counties")
+                    for c in counties:
+                        co_kwargs = {k: v for k, v in c.items() if k in COUNTY_FIELDS}
+                        db.insert_county_stats(conn, **co_kwargs)
+                        rows_county += 1
+
+                    db.mark_parsed(conn, link["url"])
+                    print(f"{len(counties)} counties")
+                except Exception as e:
+                    print(f"ERROR: {e}")
 
             print(f"  Inserted {rows_reg} registration rows, {rows_county} county rows")
 

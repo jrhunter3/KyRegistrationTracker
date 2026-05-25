@@ -4,11 +4,18 @@ from ky_voter_tracker.database import (
     get_registrations,
     insert_county_stats,
     get_county_stats,
+    insert_precinct_stats,
+    get_precinct_stats,
+    delete_precinct_stats_by_month,
+    insert_district_stats,
+    get_district_stats,
+    delete_district_stats_by_month,
     mark_downloaded,
     mark_parsed,
     is_downloaded,
     get_downloaded_urls,
     get_unparsed_files,
+    reset_parsed_flags,
 )
 
 
@@ -180,3 +187,213 @@ class TestDownloadsLog:
         mark_downloaded(conn, "https://example.com/b.xls", "b.xls")
         urls = get_downloaded_urls(conn)
         assert len(urls) == 2
+
+
+_PRECINCT_ARGS = (
+    "2024-01", "001", "ADAIR", "A001 MAIN", "201-2-012-3",
+    100, 200, 30, 20, 10, 5, 3, 1, 0, 0,
+    200, 300, 500, "test.xls",
+)
+
+_DISTRICT_ARGS_CONGRESS = (
+    "2024-01", "congressional", "1",
+    1000, 2000, 300, 200, 100, 50, 30, 10, 0, 0,
+    2000, 3000, 5000, "test.xls",
+)
+
+
+class TestDeletePrecinctStatsByMonth:
+    def test_deletes_only_matching_month(self):
+        conn = _memory_db()
+        insert_precinct_stats(conn, *_PRECINCT_ARGS)
+        args2 = (
+            "2024-02", "001", "ADAIR", "A001 MAIN", "201-2-012-3",
+            100, 200, 30, 20, 10, 5, 3, 1, 0, 0,
+            200, 300, 500, "test.xls",
+        )
+        insert_precinct_stats(conn, *args2)
+        delete_precinct_stats_by_month(conn, "2024-01")
+        remaining = conn.execute("SELECT COUNT(*) FROM precinct_stats").fetchone()[0]
+        assert remaining == 1
+        rows = conn.execute("SELECT month FROM precinct_stats").fetchall()
+        assert rows[0]["month"] == "2024-02"
+
+    def test_no_effect_when_month_empty(self):
+        conn = _memory_db()
+        insert_precinct_stats(conn, *_PRECINCT_ARGS)
+        delete_precinct_stats_by_month(conn, "2099-12")
+        remaining = conn.execute("SELECT COUNT(*) FROM precinct_stats").fetchone()[0]
+        assert remaining == 1
+
+
+class TestDistrictStats:
+    def test_insert_and_retrieve(self):
+        conn = _memory_db()
+        insert_district_stats(conn, *_DISTRICT_ARGS_CONGRESS)
+        rows = get_district_stats(conn)
+        assert len(rows) == 1
+        r = rows[0]
+        assert r["district_type"] == "congressional"
+        assert r["district_number"] == "1"
+        assert r["total"] == 5000
+
+    def test_filter_by_type(self):
+        conn = _memory_db()
+        insert_district_stats(conn, *_DISTRICT_ARGS_CONGRESS)
+        args2 = (
+            "2024-01", "house", "001",
+            100, 200, 30, 20, 10, 5, 3, 1, 0, 0,
+            200, 300, 500, "test.xls",
+        )
+        insert_district_stats(conn, *args2)
+        rows = get_district_stats(conn, district_type="house")
+        assert len(rows) == 1
+        assert rows[0]["district_number"] == "001"
+
+    def test_filter_by_month(self):
+        conn = _memory_db()
+        insert_district_stats(conn, *_DISTRICT_ARGS_CONGRESS)
+        args2 = (
+            "2024-02", "congressional", "1",
+            2000, 3000, 400, 300, 200, 100, 50, 20, 10, 0,
+            3000, 4000, 7000, "test.xls",
+        )
+        insert_district_stats(conn, *args2)
+        rows = get_district_stats(conn, from_month="2024-02", until_month="2024-02")
+        assert len(rows) == 1
+        assert rows[0]["total"] == 7000
+
+    def test_upsert_replaces(self):
+        conn = _memory_db()
+        insert_district_stats(conn, *_DISTRICT_ARGS_CONGRESS)
+        args2 = (
+            "2024-01", "congressional", "1",
+            999, 888, 77, 66, 55, 44, 33, 22, 11, 0,
+            500, 600, 1100, "second.xls",
+        )
+        insert_district_stats(conn, *args2)
+        rows = get_district_stats(conn, district_type="congressional")
+        assert len(rows) == 1
+        assert rows[0]["total"] == 1100
+
+
+class TestDeleteDistrictStatsByMonth:
+    def test_deletes_only_matching_month(self):
+        conn = _memory_db()
+        insert_district_stats(conn, *_DISTRICT_ARGS_CONGRESS)
+        args2 = (
+            "2024-02", "congressional", "1",
+            2000, 3000, 400, 300, 200, 100, 50, 20, 10, 0,
+            3000, 4000, 7000, "test.xls",
+        )
+        insert_district_stats(conn, *args2)
+        delete_district_stats_by_month(conn, "2024-01")
+        remaining = conn.execute("SELECT COUNT(*) FROM district_stats").fetchone()[0]
+        assert remaining == 1
+        rows = conn.execute("SELECT month FROM district_stats").fetchall()
+        assert rows[0]["month"] == "2024-02"
+
+    def test_then_insert_after_delete(self):
+        conn = _memory_db()
+        insert_district_stats(conn, *_DISTRICT_ARGS_CONGRESS)
+        delete_district_stats_by_month(conn, "2024-01")
+        remaining = conn.execute("SELECT COUNT(*) FROM district_stats").fetchone()[0]
+        assert remaining == 0
+        insert_district_stats(conn, *_DISTRICT_ARGS_CONGRESS)
+        rows = get_district_stats(conn)
+        assert len(rows) == 1
+
+
+class TestGetCountyStatsFilters:
+    def test_from_month(self):
+        conn = _memory_db()
+        insert_county_stats(conn, *_COUNTY_ARGS_ADAIR)
+        args2 = (
+            "2024-02", "001", "ADAIR", 16, 3740, 8978, 435, 322, 20, 3, 1, 0, 0, 0, 6483, 7016, 13499, "test.xls"
+        )
+        insert_county_stats(conn, *args2)
+        rows = get_county_stats(conn, from_month="2024-02")
+        assert len(rows) == 1
+        assert rows[0]["month"] == "2024-02"
+
+    def test_until_month(self):
+        conn = _memory_db()
+        insert_county_stats(conn, *_COUNTY_ARGS_ADAIR)
+        args2 = (
+            "2024-02", "001", "ADAIR", 16, 3740, 8978, 435, 322, 20, 3, 1, 0, 0, 0, 6483, 7016, 13499, "test.xls"
+        )
+        insert_county_stats(conn, *args2)
+        rows = get_county_stats(conn, until_month="2024-01")
+        assert len(rows) == 1
+        assert rows[0]["month"] == "2024-01"
+
+    def test_filter_by_county_name(self):
+        conn = _memory_db()
+        insert_county_stats(conn, *_COUNTY_ARGS_ADAIR)
+        insert_county_stats(conn, *_COUNTY_ARGS_ALLEN)
+        rows = get_county_stats(conn, county_name="ALLEN")
+        assert len(rows) == 1
+        assert rows[0]["county_code"] == "002"
+
+
+class TestGetPrecinctStats:
+    def test_insert_and_retrieve(self):
+        conn = _memory_db()
+        insert_precinct_stats(conn, *_PRECINCT_ARGS)
+        rows = get_precinct_stats(conn)
+        assert len(rows) == 1
+        r = rows[0]
+        assert r["month"] == "2024-01"
+        assert r["county_code"] == "001"
+        assert r["precinct"] == "A001 MAIN"
+        assert r["total"] == 500
+
+    def test_filter_by_month(self):
+        conn = _memory_db()
+        insert_precinct_stats(conn, *_PRECINCT_ARGS)
+        args2 = (
+            "2024-02", "001", "ADAIR", "A001 MAIN", "201-2-012-3",
+            100, 200, 30, 20, 10, 5, 3, 1, 0, 0,
+            200, 300, 500, "test.xls",
+        )
+        insert_precinct_stats(conn, *args2)
+        rows = get_precinct_stats(conn, from_month="2024-02", until_month="2024-02")
+        assert len(rows) == 1
+        assert rows[0]["month"] == "2024-02"
+
+    def test_filter_by_county_code(self):
+        conn = _memory_db()
+        insert_precinct_stats(conn, *_PRECINCT_ARGS)
+        args2 = (
+            "2024-01", "002", "ALLEN", "B001 OTHER", "202-3-015-4",
+            200, 300, 40, 30, 20, 10, 5, 2, 1, 0,
+            400, 500, 900, "test.xls",
+        )
+        insert_precinct_stats(conn, *args2)
+        rows = get_precinct_stats(conn, county_code="002")
+        assert len(rows) == 1
+        assert rows[0]["county_name"] == "ALLEN"
+
+
+class TestResetParsedFlags:
+    def test_resets_parsed_to_downloaded(self):
+        conn = _memory_db()
+        mark_downloaded(conn, "https://example.com/a.xls", "a.xls")
+        mark_parsed(conn, "https://example.com/a.xls")
+        reset_parsed_flags(conn)
+        row = conn.execute(
+            "SELECT status, parsed FROM downloads_log WHERE url = ?",
+            ("https://example.com/a.xls",),
+        ).fetchone()
+        assert row["status"] == "downloaded"
+        assert row["parsed"] == 0
+
+    def test_does_not_affect_failed(self):
+        conn = _memory_db()
+        mark_downloaded(conn, "https://example.com/a.xls", "a.xls", status="failed")
+        reset_parsed_flags(conn)
+        row = conn.execute(
+            "SELECT status FROM downloads_log WHERE url = ?",
+            ("https://example.com/a.xls",),
+        ).fetchone()
+        assert row["status"] == "failed"
